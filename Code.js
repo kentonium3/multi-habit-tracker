@@ -1,0 +1,203 @@
+/**
+ * @fileoverview Main script file containing core functions and triggers.
+ * Handles form submissions, initializes the system, and orchestrates other modules.
+ */
+
+/**
+ * --- GLOBAL CONFIGURATION ---
+ * Modify these constants to match your sheet names.
+ * Do not change them once the system is live.
+ */
+const SHEET_NAMES = {
+  HABITS: 'Habits_Main',
+  TRACKING: 'Daily_Tracking',
+  DASHBOARD: 'Dashboard',
+  CONFIG: 'Config'
+};
+
+/**
+ * Trigger function that fires on a new Google Form submission.
+ * It's the primary entry point for processing new habit entries.
+ * @param {Object} e The event object containing form submission data.
+ */
+function onFormSubmit(e) {
+  // Use a try-catch block for robust error handling
+  try {
+    const config = getConfig();
+    if (config.debugMode) {
+      log('INFO', 'onFormSubmit triggered.');
+      log('DEBUG', 'Event object received:', JSON.stringify(e));
+    }
+
+    // Process the new form entry
+    const entryData = e.namedValues;
+    processNewEntry(entryData);
+
+    // Update the dashboard with new data
+    updateDashboard();
+
+    // Check if it's time to send an email
+    const lastSentTimestamp = new Date(config.lastEmailSent);
+    if (shouldSendEmail(lastSentTimestamp, config.emailFrequency)) {
+      sendAccountabilityEmail();
+    }
+
+    log('INFO', 'onFormSubmit completed successfully.');
+
+  } catch (error) {
+    log('ERROR', 'An error occurred during form submission processing:', error.message, error.stack);
+    // You could also send an alert email to the admin here.
+  }
+}
+
+/**
+ * Trigger function that fires on a spreadsheet edit.
+ * This is a simple trigger and does not require manual setup in the Apps Script Triggers menu.
+ * @param {Object} e The event object containing information about the edit.
+ */
+function onEdit(e) {
+  try {
+    const config = getConfig();
+    if (config.debugMode) {
+      log('DEBUG', 'onEdit triggered.');
+    }
+    
+    const range = e.range;
+    const sheet = range.getSheet();
+    
+    // Check if the edit is in the Habits_Main sheet, in the second column (HabitName),
+    // and if a new habit is being entered.
+    if (sheet.getName() === SHEET_NAMES.HABITS && range.getColumn() === 2) {
+      const habitIdCell = sheet.getRange(range.getRow(), 1);
+      // Check if the HabitID cell is empty and a HabitName has been entered
+      if (habitIdCell.getValue() === '' && range.getValue() !== '') {
+        // Automatically generate a unique ID by finding the last one
+        const habitsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.HABITS);
+        const lastRow = habitsSheet.getLastRow();
+        let lastIdNumber = 0;
+        
+        // Find the highest number in the existing HabitID column
+        if (lastRow > 1) { // Check if there are habits beyond the header
+          const ids = habitsSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+          const lastId = ids.flat().filter(String).pop();
+          if (lastId && lastId.startsWith('H')) {
+            lastIdNumber = parseInt(lastId.substring(1));
+          }
+        }
+        
+        const newIdNumber = lastIdNumber + 1;
+        const newId = 'H' + newIdNumber.toString().padStart(3, '0');
+
+        habitIdCell.setValue(newId);
+        log('INFO', `Auto-populated HabitID for new habit: ${range.getValue()}`);
+
+        // Update the form update button to signal a required update
+        setFormUpdateButtonStatus('pending');
+      }
+    }
+  } catch (error) {
+    log('ERROR', 'An error occurred during onEdit processing:', error.message, error.stack);
+  }
+}
+
+/**
+ * Trigger function that runs when the spreadsheet is opened.
+ * It creates a custom menu to make core functions easily accessible.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+      .createMenu('⚙️ My Habit Tracker')
+      .addItem('Setup Initial Configuration', 'setupInitialConfig')
+      .addSeparator()
+      .addItem('Update Form Dropdown', 'updateFormDropdownAndStatus')
+      .addToUi();
+}
+
+/**
+ * A wrapper function to update the form dropdown and reset the button status.
+ * This function is attached to the custom menu item.
+ */
+function updateFormDropdownAndStatus() {
+  try {
+    updateHabitFormDropdown();
+    setFormUpdateButtonStatus('success');
+  } catch (error) {
+    log('ERROR', 'Failed to update form dropdown and status:', error.message);
+  }
+}
+
+/**
+ * Sets the status of the form update button.
+ * @param {string} status The status to set ('pending' or 'success').
+ */
+function setFormUpdateButtonStatus(status) {
+  const habitsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.HABITS);
+  if (!habitsSheet) {
+    log('ERROR', 'Habits_Main sheet not found. Cannot set button status.');
+    return;
+  }
+  
+  const buttonCell = habitsSheet.getRange('J1');
+  
+  if (status === 'pending') {
+    buttonCell.setValue('⚠️ Form Update Needed');
+    buttonCell.setBackground('#f4e868'); // Yellow color
+  } else if (status === 'success') {
+    buttonCell.setValue('✅ Form Updated');
+    buttonCell.setBackground('#a8e4a0'); // Green color
+  }
+}
+
+/**
+ * Initializes the entire system.
+ * This function should be run once manually after setup.
+ * It creates the required sheets, sets initial config, and sets up triggers.
+ */
+function setupInitialConfig() {
+  try {
+    log('INFO', 'Starting initial configuration setup...');
+    
+    // Create and initialize the Config sheet
+    createConfigSheet();
+
+    // Set up the form and its triggers
+    const formUrl = setupFormTrigger();
+    log('INFO', 'Form is configured and trigger is set. Form URL:', formUrl);
+    
+    // Update the form dropdown for the first time
+    updateHabitFormDropdown();
+
+    // Set up data validation for the Habits_Main sheet
+    const habitsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.HABITS);
+    if (habitsSheet) {
+      // Data validation for Status column
+      const statusRule = SpreadsheetApp.newDataValidation().requireValueInList(['Active', 'Paused', 'Completed']).setAllowInvalid(false).build();
+      habitsSheet.getRange('G2:G').setDataValidation(statusRule);
+
+      // Data validation for Frequency column
+      const frequencyRule = SpreadsheetApp.newDataValidation().requireValueInList(['Daily', 'Weekly', 'Monthly']).setAllowInvalid(false).build();
+      habitsSheet.getRange('E2:E').setDataValidation(frequencyRule);
+
+      // Data validation for StartDate and EndDate columns (must be a valid date)
+      const dateRule = SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(false).build();
+      habitsSheet.getRange('C2:C').setDataValidation(dateRule);
+      habitsSheet.getRange('D2:D').setDataValidation(dateRule);
+
+      // Data validation for DesiredTimes (must be a time value or 'Any')
+      const timeOrAnyRule = SpreadsheetApp.newDataValidation().requireFormulaSatisfied('=OR(F2="Any", ISNUMBER(F2))').setAllowInvalid(false).build();
+      habitsSheet.getRange('F2:F').setDataValidation(timeOrAnyRule);
+
+      log('INFO', 'Data validation rules added to Habits_Main sheet.');
+    }
+
+    // All done, set the last email sent timestamp to prevent immediate sending
+    const configSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.CONFIG);
+    const lastSentCell = configSheet.getRange('B3');
+    lastSentCell.setValue(new Date());
+
+    log('INFO', 'Initial configuration completed successfully. You can now use the form!');
+    
+  } catch (error) {
+    log('ERROR', 'Initial configuration failed:', error.message, error.stack);
+  }
+}
