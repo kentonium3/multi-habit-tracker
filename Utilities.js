@@ -1,5 +1,5 @@
 /**
- * @fileoverview A collection of helper and utility functions.
+ * @fileoverview Updated utility functions for frequency-based habit tracking
  */
 
 /**
@@ -25,7 +25,7 @@ function log(level, ...message) {
 }
 
 /**
- * Processes a new form entry and appends it to the tracking sheet.
+ * Processes a new form entry for frequency-based habit tracking
  * @param {Object} entryData The named values from the form submission.
  */
 function processNewEntry(entryData) {
@@ -34,38 +34,54 @@ function processNewEntry(entryData) {
   const habitsSheet = ss.getSheetByName(SHEET_NAMES.HABITS);
   
   const habitName = entryData['Habit Selection'][0];
-  const statusText = entryData['Success/Miss'][0]; // Changed from 'Success/Failure'
-  const comments = entryData['Comments'][0];
-  const actualTime = entryData['Time of completion'][0];
+  const completionStatus = entryData['Completion Status'][0] || entryData['Success/Miss'][0]; // Handle both old and new forms
+  const completionCount = entryData['How many times completed today?'][0] || '1'; // Default to 1 for backward compatibility
+  const comments = entryData['Comments'][0] || '';
   const entryTimestamp = new Date();
   
-  // Find the HabitID for the submitted habit
-  const habitData = habitsSheet.getRange(2, 1, habitsSheet.getLastRow() - 1, 2).getValues();
+  // Find the HabitID and target frequency for the submitted habit
+  const habitData = habitsSheet.getRange(2, 1, habitsSheet.getLastRow() - 1, 7).getValues(); // Get through column G (Status)
   const habitRow = habitData.find(row => row[1] === habitName);
-  const habitId = habitRow ? habitRow[0] : null;
-
-  if (!habitId) {
-    log('ERROR', `Habit ID not found for habit name: ${habitName}`);
+  
+  if (!habitRow) {
+    log('ERROR', `Habit not found for habit name: ${habitName}`);
     return;
   }
-
-  // Determine success based on the new status text
-  const success = statusText === 'Success';
   
-  // Append new row to the tracking sheet
+  const habitId = habitRow[0];
+  const frequency = habitRow[4] || 'Daily'; // Column E is Frequency
+  const targetFrequencyPerPeriod = habitRow[5] || 1; // Column F is FrequencyPerPeriod
+  
+  // Parse completion count
+  let actualCount = 1;
+  if (completionCount === '5+') {
+    actualCount = 5;
+  } else {
+    actualCount = parseInt(completionCount) || 1;
+  }
+  
+  // Determine success based on completion status and count vs target
+  let success = false;
+  if (completionStatus === 'Completed' || completionStatus === 'Success') {
+    success = actualCount >= targetFrequencyPerPeriod;
+  }
+  
+  // Append new row to the tracking sheet with frequency-based data
   const newRow = [
-    entryTimestamp,
-    habitId,
-    habitName,
-    'Not Applicable', // This would require more complex logic for target times
-    actualTime,
-    success,
-    comments,
-    entryTimestamp
+    entryTimestamp,              // A: Timestamp
+    habitId,                     // B: HabitID  
+    habitName,                   // C: HabitName
+    frequency,                   // D: Frequency (Daily/Weekly)
+    targetFrequencyPerPeriod,    // E: TargetFrequencyPerPeriod
+    actualCount,                 // F: ActualCompletions
+    success,                     // G: Success (true if actualCount >= targetFrequencyPerPeriod)
+    comments,                    // H: Comments
+    entryTimestamp               // I: CreatedDate
   ];
   
   trackingSheet.appendRow(newRow);
-  log('INFO', `New entry appended to ${SHEET_NAMES.TRACKING}:`, JSON.stringify(newRow));
+  log('INFO', `New frequency-based entry appended to ${SHEET_NAMES.TRACKING}:`, JSON.stringify(newRow));
+  log('INFO', `Habit: ${habitName}, Frequency: ${frequency}, Target: ${targetFrequencyPerPeriod}x, Actual: ${actualCount}x, Success: ${success}`);
 }
 
 /**
@@ -90,4 +106,36 @@ function isSameDay(d1, d2) {
   return d1.getFullYear() === d2.getFullYear() &&
          d1.getMonth() === d2.getMonth() &&
          d1.getDate() === d2.getDate();
+}
+
+/**
+ * Gets the total completions for a habit on a specific date
+ * @param {Array<Array>} trackingData All tracking data
+ * @param {string} habitId The habit ID to check
+ * @param {Date} date The date to check
+ * @return {number} Total completions for that habit on that date
+ */
+function getHabitCompletionsForDate(trackingData, habitId, date) {
+  const dateKey = date.toISOString().split('T')[0];
+  
+  return trackingData
+    .filter(entry => {
+      const entryDate = new Date(entry[0]);
+      const entryDateKey = entryDate.toISOString().split('T')[0];
+      return entry[1] === habitId && entryDateKey === dateKey;
+    })
+    .reduce((total, entry) => total + (entry[5] || 1), 0); // Sum ActualCompletions (column F)
+}
+
+/**
+ * Checks if a habit was successful on a specific date based on frequency
+ * @param {Array<Array>} trackingData All tracking data
+ * @param {string} habitId The habit ID to check
+ * @param {Date} date The date to check
+ * @param {number} targetFrequency Required completions per day
+ * @return {boolean} True if habit met its frequency target
+ */
+function wasHabitSuccessfulOnDate(trackingData, habitId, date, targetFrequency) {
+  const completions = getHabitCompletionsForDate(trackingData, habitId, date);
+  return completions >= targetFrequency;
 }

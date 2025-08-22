@@ -1,5 +1,6 @@
 /**
- * @fileoverview Manages the Google Form, including dynamically updating its contents.
+ * @fileoverview Updated Form.js for frequency-based habit tracking
+ * Manages the Google Form for daily habit completion counting
  */
 
 /**
@@ -109,4 +110,72 @@ function setupFormTrigger() {
   
   log('INFO', 'Form trigger created successfully.');
   return form.getPublishedUrl();
+}
+
+/**
+ * Creates or updates the Google Form to use frequency-based tracking
+ * This should be run after migrating to the frequency approach
+ */
+function updateFormForFrequencyTracking() {
+  try {
+    log('INFO', 'Updating form for frequency-based tracking...');
+    
+    const form = getForm();
+    const items = form.getItems();
+    
+    // Remove or update time-related questions
+    items.forEach(item => {
+      const title = item.getTitle();
+      
+      // Remove the time completion question if it exists
+      if (title === 'Time of completion' || title.includes('Time')) {
+        form.deleteItem(item);
+        log('INFO', `Removed time-related question: ${title}`);
+      }
+    });
+    
+    // Update the Success/Miss question to be clearer for frequency tracking
+    let successItem = null;
+    items.forEach(item => {
+      if (item.getTitle() === 'Success/Miss' || item.getTitle().includes('Success')) {
+        successItem = item;
+      }
+    });
+    
+    if (successItem) {
+      const choices = ['Completed', 'Missed'];
+      const choiceItems = choices.map(choice => successItem.asListItem().createChoice(choice));
+      successItem.asListItem().setChoices(choiceItems);
+      successItem.setTitle('Completion Status');
+      successItem.setHelpText('Did you complete this habit occurrence?');
+      log('INFO', 'Updated completion status question');
+    }
+    
+    // Add or update completion count question
+    let countItem = null;
+    items.forEach(item => {
+      if (item.getTitle().includes('Count') || item.getTitle().includes('Times')) {
+        countItem = item;
+      }
+    });
+    
+    if (!countItem) {
+      // Add new completion count question
+      countItem = form.addListItem();
+      countItem.setTitle('How many times completed today?');
+      countItem.setHelpText('Select the number of times you have completed this habit today');
+      
+      const countChoices = ['1', '2', '3', '4', '5+'];
+      const countChoiceItems = countChoices.map(choice => countItem.createChoice(choice));
+      countItem.setChoices(countChoiceItems);
+      countItem.setRequired(true);
+      
+      log('INFO', 'Added completion count question');
+    }
+    
+    log('INFO', 'Form updated successfully for frequency tracking');
+    
+  } catch (error) {
+    log('ERROR', 'Failed to update form for frequency tracking:', error.message);
+  }
 }

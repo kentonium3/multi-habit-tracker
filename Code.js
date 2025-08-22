@@ -1,6 +1,6 @@
 /**
- * @fileoverview Main script file containing core functions and triggers.
- * Handles form submissions, initializes the system, and orchestrates other modules.
+ * @fileoverview Updated Code.js for frequency-based habit tracking
+ * Updated data validation and menu items
  */
 
 /**
@@ -105,6 +105,9 @@ function onOpen() {
       .addItem('Update Form Dropdown', 'updateFormDropdownAndStatus')
       .addItem('Repair Missing HabitIDs', 'repairMissingHabitIDs')
       .addItem('Test Email Functionality', 'testEmailFunctionality')
+      .addSeparator()
+      .addItem('🔄 Migrate to Frequency Tracking', 'migrateToFrequencyTracking')
+      .addItem('🔧 Fix Data Validation Columns', 'fixDataValidationColumns')
       .addToUi();
 }
 
@@ -144,7 +147,7 @@ function setFormUpdateButtonStatus(status) {
 }
 
 /**
- * Initializes the entire system.
+ * Initializes the entire system with frequency-based tracking.
  * This function should be run once manually after setup.
  * It creates the required sheets, sets initial config, and sets up triggers.
  */
@@ -165,27 +168,27 @@ function setupInitialConfig() {
     // Update the form dropdown for the first time
     updateHabitFormDropdown();
 
-    // Set up data validation for the Habits_Main sheet
+    // Set up data validation for the Habits_Main sheet with frequency-based fields
     const habitsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.HABITS);
     if (habitsSheet) {
+      // Data validation for Frequency column (Daily, Weekly)
+      const frequencyRule = SpreadsheetApp.newDataValidation().requireValueInList(['Daily', 'Weekly']).setAllowInvalid(false).build();
+      habitsSheet.getRange('E2:E').setDataValidation(frequencyRule);
+
+      // Data validation for FrequencyPerPeriod column (1, 2, 3, 4)
+      const timesPerPeriodRule = SpreadsheetApp.newDataValidation().requireValueInList(['1', '2', '3', '4']).setAllowInvalid(false).build();
+      habitsSheet.getRange('F2:F').setDataValidation(timesPerPeriodRule);
+
       // Data validation for Status column
       const statusRule = SpreadsheetApp.newDataValidation().requireValueInList(['Active', 'Paused', 'Completed']).setAllowInvalid(false).build();
       habitsSheet.getRange('G2:G').setDataValidation(statusRule);
-
-      // Data validation for Frequency column
-      const frequencyRule = SpreadsheetApp.newDataValidation().requireValueInList(['Daily', 'Weekly', 'Monthly']).setAllowInvalid(false).build();
-      habitsSheet.getRange('E2:E').setDataValidation(frequencyRule);
 
       // Data validation for StartDate and EndDate columns (must be a valid date)
       const dateRule = SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(false).build();
       habitsSheet.getRange('C2:C').setDataValidation(dateRule);
       habitsSheet.getRange('D2:D').setDataValidation(dateRule);
 
-      // Data validation for DesiredTimes (must be a time value or 'Any')
-      const timeOrAnyRule = SpreadsheetApp.newDataValidation().requireFormulaSatisfied('=OR(F2="Any", ISNUMBER(F2))').setAllowInvalid(false).build();
-      habitsSheet.getRange('F2:F').setDataValidation(timeOrAnyRule);
-
-      log('INFO', 'Data validation rules added to Habits_Main sheet.');
+      log('INFO', 'Data validation rules added to Habits_Main sheet for frequency tracking.');
     }
 
     // All done, set the last email sent timestamp to prevent immediate sending
