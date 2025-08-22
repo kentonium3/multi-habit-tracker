@@ -28,7 +28,14 @@ function getConfig() {
         config.lastEmailSent = value;
         break;
       case 'DebugMode':
-        config.debugMode = value.toLowerCase() === 'true';
+        // Handle both string and boolean values
+        if (typeof value === 'boolean') {
+          config.debugMode = value;
+        } else if (typeof value === 'string') {
+          config.debugMode = value.toLowerCase() === 'true';
+        } else {
+          config.debugMode = false; // Default fallback
+        }
         break;
       default:
         break;
